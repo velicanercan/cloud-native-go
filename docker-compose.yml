@@ -9,7 +9,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: [ "sh", "-c", "/myapp/bin/migrate up && /myapp/bin/api"]
+    command: ["sh", "-c", "/cloud-native-go/bin/migrate up && /cloud-native-go/bin/api"]
 
   db:
     image: postgres:alpine

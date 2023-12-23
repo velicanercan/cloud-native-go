@@ -4,6 +4,9 @@ up:
 down:
 	@docker-compose down
 
+build:
+	@docker-compose build
+
 migrate: migrateBuild
 	@./bin/migrate $(filter-out $@,$(MAKECMDGOALS))
 
