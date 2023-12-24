@@ -13,5 +13,8 @@ migrate: migrateBuild
 migrateBuild:
 	@go build -o bin/migrate cmd/migrate/main.go
 
+test:
+	@go test -v ./...
+
 %:
 	@:

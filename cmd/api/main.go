@@ -7,8 +7,14 @@ import (
 	"strconv"
 
 	"github.com/velicanercan/cloud-native-go/cmd/api/router"
+	"github.com/velicanercan/cloud-native-go/util/validator"
 	"github.com/velicanercan/cloud-native-go/config"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
+
+const fmtDbString = "host=%s port=%d user=%s dbname=%s password=%s sslmode=disable"
 
 //	@title			Cloud Native Go API
 //	@version		1.0
@@ -17,14 +23,29 @@ import (
 //	@contact.name	Velican Ercan
 //	@contact.url	github/velicanercan
 
-//	@host		localhost:8080
-//	@BasePath	/api/v1
+// @host		localhost:8080
+// @BasePath	/api/v1
 func main() {
 	c := config.New()
-	r := router.New()
+	v := validator.New()
+	var logLevel gormlogger.LogLevel
+	switch c.DB.Debug {
+	case true:
+		logLevel = gormlogger.Info
+	default:
+		logLevel = gormlogger.Error
+	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/hello", hello)
+	dbString := fmt.Sprintf(fmtDbString, c.DB.Host, c.DB.Port, c.DB.Username, c.DB.DBName, c.DB.Password)
+
+	db, err := gorm.Open(postgres.Open(dbString), &gorm.Config{Logger: gormlogger.Default.LogMode(logLevel)})
+	if err != nil {
+		slog.Error("Failed to connect database", "err", err)
+		return
+	}
+
+	r := router.New(db, v)
+
 	s := &http.Server{
 		Addr:         fmt.Sprintf(":%d", c.Server.Port),
 		Handler:      r,
@@ -36,8 +57,4 @@ func main() {
 	if err := s.ListenAndServe(); err != nil {
 		slog.Error("Server stopped", err)
 	}
-}
-
-func hello(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello World!")
 }

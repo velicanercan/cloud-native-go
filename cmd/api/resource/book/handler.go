@@ -1,8 +1,29 @@
 package book
 
-import "net/http"
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
 
-type API struct{}
+	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
+	e "github.com/velicanercan/cloud-native-go/cmd/api/resource/common/err"
+	validatorUtil "github.com/velicanercan/cloud-native-go/util/validator"
+	"gorm.io/gorm"
+)
+
+type API struct {
+	repository *Repository
+	validator  *validator.Validate
+}
+
+func New(db *gorm.DB, v *validator.Validate) *API {
+	return &API{
+		repository: NewRepository(db),
+		validator:  v,
+	}
+}
 
 // Read godoc
 //
@@ -17,7 +38,27 @@ type API struct{}
 //	@failure		404
 //	@failure		500	{object}	err.Error
 //	@router			/api/v1/books/{id} [get]
-func (a *API) Read(w http.ResponseWriter, r *http.Request) {}
+func (a *API) Read(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		e.ServerError(w, e.RespInvalidURLParamID)
+		return
+	}
+
+	book, err := a.repository.Read(id)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		e.ServerError(w, e.RespDBDataAccessFailed)
+	}
+
+	if err := json.NewEncoder(w).Encode(book.ToDTO()); err != nil {
+		e.ServerError(w, e.RespJSONEncodeFailed)
+		return
+	}
+}
 
 // Create godoc
 //
@@ -32,7 +73,33 @@ func (a *API) Read(w http.ResponseWriter, r *http.Request) {}
 //	@failure		422	{object}	err.Errors
 //	@failure		500	{object}	err.Error
 //	@router			/api/v1/books [post]
-func (a *API) Create(w http.ResponseWriter, r *http.Request) {}
+func (a *API) Create(w http.ResponseWriter, r *http.Request) {
+	form := &Form{}
+	if err := json.NewDecoder(r.Body).Decode(form); err != nil {
+		e.ServerError(w, e.RespJSONDecodeFailed)
+		return
+	}
+
+	if err := a.validator.Struct(form); err != nil {
+		respBody, err := json.Marshal(validatorUtil.ToErrResponse(err))
+		if err != nil {
+			e.ServerError(w, e.RespJSONEncodeFailed)
+			return
+		}
+		e.ValidationErrors(w, respBody)
+		return
+	}
+
+	newBook := form.ToModel()
+	newBook.ID = uuid.New()
+
+	_, err := a.repository.Create(newBook)
+	if err != nil {
+		e.ServerError(w, e.RespDBDataInsertFailed)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
 
 // Update godoc
 //
@@ -49,7 +116,42 @@ func (a *API) Create(w http.ResponseWriter, r *http.Request) {}
 //	@failure		422	{object}	err.Errors
 //	@failure		500	{object}	err.Error
 //	@router			/api/v1/books/{id} [put]
-func (a *API) Update(w http.ResponseWriter, r *http.Request) {}
+func (a *API) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		e.ServerError(w, e.RespInvalidURLParamID)
+		return
+	}
+
+	form := &Form{}
+	if err := json.NewDecoder(r.Body).Decode(form); err != nil {
+		e.ServerError(w, e.RespJSONDecodeFailed)
+		return
+	}
+
+	if err := a.validator.Struct(form); err != nil {
+		respBody, err := json.Marshal(validatorUtil.ToErrResponse(err))
+		if err != nil {
+			e.ServerError(w, e.RespJSONEncodeFailed)
+			return
+		}
+		e.ValidationErrors(w, respBody)
+		return
+	}
+
+	book := form.ToModel()
+	book.ID = id
+
+	rows, err := a.repository.Update(book)
+	if err != nil {
+		e.ServerError(w, e.RespDBDataUpdateFailed)
+		return
+	}
+	if rows == 0 {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+}
 
 // Delete godoc
 //
@@ -64,7 +166,23 @@ func (a *API) Update(w http.ResponseWriter, r *http.Request) {}
 //	@failure		404
 //	@failure		500	{object}	err.Error
 //	@router			/api/v1/books/{id} [delete]
-func (a *API) Delete(w http.ResponseWriter, r *http.Request) {}
+func (a *API) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		e.ServerError(w, e.RespInvalidURLParamID)
+		return
+	}
+
+	rows, err := a.repository.Delete(id)
+	if err != nil {
+		e.ServerError(w, e.RespDBDataDeleteFailed)
+		return
+	}
+	if rows == 0 {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+}
 
 // List godoc
 //
@@ -76,4 +194,18 @@ func (a *API) Delete(w http.ResponseWriter, r *http.Request) {}
 //	@success		200	{array}		DTO
 //	@failure		500	{object}	err.Error
 //	@router			/api/v1/books [get]
-func (a *API) List(w http.ResponseWriter, r *http.Request) {}
+func (a *API) List(w http.ResponseWriter, r *http.Request) {
+	books, err := a.repository.List()
+	if err != nil {
+		e.ServerError(w, e.RespDBDataAccessFailed)
+		return
+	}
+	if len(books) == 0 {
+		fmt.Fprint(w, "[]")
+		return
+	}
+	if err := json.NewEncoder(w).Encode(books); err != nil {
+		e.ServerError(w, e.RespJSONEncodeFailed)
+		return
+	}
+}
